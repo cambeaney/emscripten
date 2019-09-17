@@ -340,6 +340,23 @@ var LibraryPThread = {
           worker.onerror = function(e) {
             err('pthread sent an error! ' + e.filename + ':' + e.lineno + ': ' + e.message);
           };
+
+          if (ENVIRONMENT_IS_NODE) {
+            worker.ref(); // XXX FIXME wat
+            worker.on('message', function(data) {
+              worker.onmessage({ data: data });
+            });
+            worker.on('close', function(data) {
+              console.log('worker closed ..!?');
+            });
+            worker.on('exit', function(data) {
+              console.log('werker exited');
+            });
+            worker.on('online', function(data) {
+              console.log('workerah is online!!!1!');
+            });
+            // note: adding onerror seems to only hurt on node.js
+          }
         }(worker));
 
 #if !WASM_BACKEND
@@ -430,6 +447,7 @@ var LibraryPThread = {
     if (ENVIRONMENT_IS_PTHREAD) throw 'Internal Error! _spawn_thread() can only ever be called from main application thread!';
 
     var worker = PThread.getNewWorker();
+
     if (worker.pthread !== undefined) throw 'Internal error!';
     if (!threadParams.pthread_ptr) throw 'Internal error, no pthread ptr!';
     PThread.runningWorkers.push(worker);
