@@ -76,7 +76,7 @@ ENVIRONMENT_IS_WORKER = typeof importScripts === 'function';
 // Extended check using process.versions fixes issue #8816.
 // (Also makes redundant the original check that 'require' is a function.)
 ENVIRONMENT_HAS_NODE = typeof process === 'object' && typeof process.versions === 'object' && typeof process.versions.node === 'string';
-ENVIRONMENT_IS_NODE = ENVIRONMENT_HAS_NODE && !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_WORKER;
+ENVIRONMENT_IS_NODE = ENVIRONMENT_HAS_NODE && !ENVIRONMENT_IS_WEB /*&& !ENVIRONMENT_IS_WORKER*/;
 ENVIRONMENT_IS_SHELL = !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIRONMENT_IS_WORKER;
 #endif // ENVIRONMENT
 
@@ -95,6 +95,10 @@ if (Module['ENVIRONMENT']) {
 var _scriptDir = import.meta.url;
 #else
 var _scriptDir = (typeof document !== 'undefined' && document.currentScript) ? document.currentScript.src : undefined;
+
+if (ENVIRONMENT_IS_NODE) {
+  _scriptDir = __filename;
+}
 #endif
 #endif
 
@@ -186,6 +190,22 @@ if (ENVIRONMENT_IS_NODE) {
   };
 
   Module['inspect'] = function () { return '[Emscripten Module object]'; };
+
+#if USE_PTHREADS
+  var nodeWorkerThreads = require('worker_threads');
+  Worker = nodeWorkerThreads.Worker;
+
+  // Polyfill the performance object, which emscripten pthreads support
+  // depends on for good timing.
+  if (typeof performance === 'undefined') {
+    performance = {
+      now: function() {
+        return Date.now();
+      }
+    };
+  }
+#endif
+
 } else
 #endif // ENVIRONMENT_MAY_BE_NODE
 #if ENVIRONMENT_MAY_BE_SHELL
@@ -386,9 +406,6 @@ assert(typeof Module['setWindowTitle'] === 'undefined', 'Module.setWindowTitle o
 {{{ makeRemovedModuleAPIAssert('readBinary') }}}
 // TODO: add when SDL2 is fixed {{{ makeRemovedModuleAPIAssert('setWindowTitle') }}}
 
-#if USE_PTHREADS
-assert(ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER, 'Pthreads do not work in non-browser environments yet (need Web Workers, or an alternative to them)');
-#endif // USE_PTHREADS
 #endif // ASSERTIONS
 
 // TODO remove when SDL2 is fixed (also see above)

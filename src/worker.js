@@ -8,41 +8,41 @@
 // that executes pthreads on the Emscripten application.
 
 // Thread-local:
-var threadInfoStruct = 0; // Info area for this thread in Emscripten HEAP (shared). If zero, this worker is not currently hosting an executing pthread.
-var selfThreadId = 0; // The ID of this thread. 0 if not hosting a pthread.
-var parentThreadId = 0; // The ID of the parent pthread that launched this thread.
+threadInfoStruct = 0; // Info area for this thread in Emscripten HEAP (shared). If zero, this worker is not currently hosting an executing pthread.
+selfThreadId = 0; // The ID of this thread. 0 if not hosting a pthread.
+parentThreadId = 0; // The ID of the parent pthread that launched this thread.
 #if !WASM_BACKEND && !MODULARIZE
-var tempDoublePtr = 0; // A temporary memory area for global float and double marshalling operations.
+tempDoublePtr = 0; // A temporary memory area for global float and double marshalling operations.
 #endif
 
 // Thread-local: Each thread has its own allocated stack space.
-var STACK_BASE = 0;
-var STACKTOP = 0;
-var STACK_MAX = 0;
+STACK_BASE = 0;
+STACKTOP = 0;
+STACK_MAX = 0;
 
 // These are system-wide memory area parameters that are set at main runtime startup in main thread, and stay constant throughout the application.
-var buffer; // All pthreads share the same Emscripten HEAP as SharedArrayBuffer with the main execution thread.
-var DYNAMICTOP_PTR = 0;
-var DYNAMIC_BASE = 0;
+buffer = undefined; // All pthreads share the same Emscripten HEAP as SharedArrayBuffer with the main execution thread.
+DYNAMICTOP_PTR = 0;
+DYNAMIC_BASE = 0;
 
-var noExitRuntime;
+noExitRuntime = undefined;
 
-var PthreadWorkerInit = {};
+PthreadWorkerInit = {};
 
 // performance.now() is specced to return a wallclock time in msecs since that Web Worker/main thread launched. However for pthreads this can cause
 // subtle problems in emscripten_get_now() as this essentially would measure time from pthread_create(), meaning that the clocks between each threads
 // would be wildly out of sync. Therefore sync all pthreads to the clock on the main browser thread, so that different threads see a somewhat
 // coherent clock across each of them (+/- 0.1msecs in testing)
-var __performance_now_clock_drift = 0;
+__performance_now_clock_drift = 0;
 
 // Cannot use console.log or console.error in a web worker, since that would risk a browser deadlock! https://bugzilla.mozilla.org/show_bug.cgi?id=1049091
 // Therefore implement custom logging facility for threads running in a worker, which queue the messages to main thread to print.
-var Module = {};
+Module = {};
 
 // These modes need to assign to these variables because of how scoping works in them.
 #if EXPORT_ES6 || MODULARIZE
-var PThread;
-var HEAPU32;
+PThread = undefined;
+HEAPU32 = undefined;
 #endif
 
 #if ASSERTIONS
@@ -53,13 +53,16 @@ function assert(condition, text) {
 
 // When error objects propagate from Web Worker to main thread, they lose helpful call stack and thread ID information, so print out errors early here,
 // before that happens.
-this.addEventListener('error', function(e) {
-  if (e.message.indexOf('SimulateInfiniteLoop') != -1) return e.preventDefault();
+// Note that addEventListener may not exist on some environments, like node.
+if (typeof addEventListener === 'function') {
+  addEventListener('error', function(e) {
+    if (e.message.indexOf('SimulateInfiniteLoop') != -1) return e.preventDefault();
 
-  var errorSource = ' in ' + e.filename + ':' + e.lineno + ':' + e.colno;
-  console.error('Pthread ' + selfThreadId + ' uncaught exception' + (e.filename || e.lineno || e.colno ? errorSource : "") + ': ' + e.message + '. Error object:');
-  console.error(e.error);
-});
+    var errorSource = ' in ' + e.filename + ':' + e.lineno + ':' + e.colno;
+    console.error('Pthread ' + selfThreadId + ' uncaught exception' + (e.filename || e.lineno || e.colno ? errorSource : "") + ': ' + e.message + '. Error object:');
+    console.error(e.error);
+  });
+}
 
 function threadPrintErr() {
   var text = Array.prototype.slice.call(arguments).join(' ');
@@ -104,13 +107,13 @@ Module['instantiateWasm'] = function(info, receiveInstance) {
 };
 #endif
 
-var wasmModule;
-var wasmMemory;
+wasmModule = undefined;
+wasmMemory = undefined;
 #if LOAD_SOURCE_MAP
-var wasmSourceMapData;
+wasmSourceMapData = undefined;
 #endif
 #if USE_OFFSET_CONVERTER
-var wasmOffsetData;
+wasmOffsetData = undefined;
 #endif
 
 this.onmessage = function(e) {
@@ -306,4 +309,61 @@ this.onmessage = function(e) {
     console.error(e.stack);
     throw e;
   }
-};
+}
+
+// Node.js support
+if (typeof require === 'function') {
+  // Create as web-worker-like an environment as we can.
+  self = {
+    location: {
+      href: __filename // XXX wat
+    }
+  };
+
+  var onmessage = this.onmessage;
+
+  var nodeWorkerThreads = require('worker_threads');
+
+  Worker = nodeWorkerThreads.Worker;
+
+  var parentPort = nodeWorkerThreads.parentPort;
+
+  parentPort.ref(); // stay alive XXX?
+//process.exit(); XXX at the right time
+
+  parentPort.on('message', function(data) {
+    onmessage({ data: data });
+  });
+
+  var nodeFS = require('fs');
+
+  var nodeRead = function(filename) {
+    // TODO: convert to absolute path?
+    return nodeFS.readFileSync(filename).toString();
+  };
+
+  function globalEval(x) {
+    this.exports = exports;
+    this.require = require;
+    this.module = module;
+    this.__filename = __filename;
+    this.__dirname = __dirname;
+    eval.call(null, x);
+  }
+
+  importScripts = function(f) {
+    globalEval(nodeRead(f));
+  };
+
+  postMessage = function(msg) {
+    parentPort.postMessage(msg);
+  };
+
+  if (typeof performance === 'undefined') {
+    performance = {
+      now: function() {
+        return Date.now();
+      }
+    };
+  }
+}
