@@ -264,7 +264,6 @@ ___cxa_find_matching_catch_9
 ___cxa_free_exception
 ___cxa_get_exception_ptr
 ___cxa_increment_exception_refcount
-___cxa_pure_virtual
 ___cxa_rethrow
 ___cxa_rethrow_primary_exception
 ___cxa_thread_atexit
@@ -386,7 +385,6 @@ ___syscall5
 ___syscall51
 ___syscall54
 ___syscall57
-___syscall6
 ___syscall60
 ___syscall63
 ___syscall64
@@ -403,7 +401,12 @@ ___syscall96
 ___syscall97
 ___unlock
 ___wait
+___wasi_emscripten_get_environ
+___wasi_environ_get
+___wasi_environ_sizes_get
+___wasi_fd_close
 ___wasi_fd_write
+___wasi_proc_exit
 __addDays
 __arraySum
 __battery
@@ -437,6 +440,7 @@ __inet_pton4_raw
 __inet_pton6
 __inet_pton6_raw
 __isLeapYear
+__memory_base
 __polyfill_set_immediate
 __pthread_cleanup_pop
 __pthread_cleanup_push
@@ -466,6 +470,7 @@ __screenOrientation
 __setLetterbox
 __set_canvas_element_size
 __softFullscreenResizeWebGLRenderTarget
+__table_base
 __write_sockaddr
 _abort
 _abs
@@ -678,6 +683,7 @@ _emscripten_get_devicemotion_status
 _emscripten_get_deviceorientation_status
 _emscripten_get_element_css_size
 _emscripten_get_env
+_emscripten_get_environ
 _emscripten_get_fullscreen_status
 _emscripten_get_gamepad_status
 _emscripten_get_heap_size
@@ -1035,6 +1041,8 @@ _emscripten_worker_respond_provisionally
 _emscripten_yield
 _endprotoent
 _endpwent
+_environ_get
+_environ_sizes_get
 _execl
 _execle
 _execlp
@@ -1045,6 +1053,7 @@ _exit
 _fabs
 _fabsf
 _fabsl
+_fd_close
 _fd_write
 _fexecve
 _filledEllipseColor
@@ -1432,6 +1441,7 @@ _pathconf
 _pixelRGBA
 _posix_spawn
 _posix_spawnp
+_proc_exit
 _pthread_attr_destroy
 _pthread_attr_getdetachstate
 _pthread_attr_getstack
@@ -1444,9 +1454,7 @@ _pthread_cleanup_pop
 _pthread_cleanup_push
 _pthread_cond_destroy
 _pthread_cond_init
-_pthread_cond_signal
 _pthread_cond_timedwait
-_pthread_cond_wait
 _pthread_condattr_destroy
 _pthread_condattr_getclock
 _pthread_condattr_getpshared
@@ -1583,8 +1591,10 @@ invoke_v
 invoke_vi
 invoke_vii
 jsStackTrace
+memory
 runAndAbortIfError
 setTempRet0
 stackTrace
 stringToNewUTF8
+table
 tempDoublePtr

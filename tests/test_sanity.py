@@ -106,6 +106,9 @@ class sanity(RunnerCore):
   @classmethod
   def setUpClass(cls):
     super(sanity, cls).setUpClass()
+    # Unlike the other test suites we explicitly don't want to be skipping
+    # the sanity checks here
+    del os.environ['EMCC_SKIP_SANITY_CHECK']
     shutil.copyfile(CONFIG_FILE, CONFIG_FILE + '_backup')
 
     print()
@@ -208,7 +211,7 @@ class sanity(RunnerCore):
       self.assertNotContained('}}}', config_file)
       self.assertContained('{{{', template_file)
       self.assertContained('}}}', template_file)
-      for content in ['EMSCRIPTEN_ROOT', 'LLVM_ROOT', 'NODE_JS', 'COMPILER_ENGINE', 'JS_ENGINES']:
+      for content in ['EMSCRIPTEN_ROOT', 'LLVM_ROOT', 'NODE_JS', 'JS_ENGINES']:
         self.assertContained(content, config_file)
 
       # The guessed config should be ok
@@ -218,7 +221,7 @@ class sanity(RunnerCore):
       # self.assertContained('hello, world!', run_js('a.out.js'), output)
 
       # Second run, with bad EM_CONFIG
-      for settings in ['blah', 'LLVM_ROOT="blarg"; JS_ENGINES=[]; COMPILER_ENGINE=NODE_JS=SPIDERMONKEY_ENGINE=[]']:
+      for settings in ['blah', 'LLVM_ROOT="blarg"; JS_ENGINES=[]; NODE_JS=[]; SPIDERMONKEY_ENGINE=[]']:
         f = open(CONFIG_FILE, 'w')
         f.write(settings)
         f.close()
@@ -541,7 +544,7 @@ fi
     self.assertTrue(os.path.exists(cache_dir_name))
     # The cache directory must contain a built libc
     if self.is_wasm_backend():
-      self.assertTrue(os.path.exists(os.path.join(cache_dir_name, 'wasm_o', 'libc.a')))
+      self.assertTrue(os.path.exists(os.path.join(cache_dir_name, 'wasm-obj', 'libc.a')))
     else:
       self.assertTrue(os.path.exists(os.path.join(cache_dir_name, 'asmjs', 'libc.bc')))
     # Exactly one child process should have triggered libc build!
@@ -564,7 +567,7 @@ fi
     self.assertTrue(os.path.exists(cache_dir_name))
     # The cache directory must contain a built libc'
     if self.is_wasm_backend():
-      self.assertTrue(os.path.exists(os.path.join(cache_dir_name, 'wasm_o', 'libc.a')))
+      self.assertTrue(os.path.exists(os.path.join(cache_dir_name, 'wasm-obj', 'libc.a')))
     else:
       self.assertTrue(os.path.exists(os.path.join(cache_dir_name, 'asmjs', 'libc.bc')))
 
@@ -845,15 +848,23 @@ BINARYEN_ROOT = ''
     ''')
     self.check_working([EMCC, path_from_root('tests', 'hello_world.c')], 'BINARYEN_ROOT must be set up in .emscripten')
 
+  def test_embuilder_force(self):
+    restore_and_set_up()
+    self.do([PYTHON, EMBUILDER, 'build', 'libemmalloc'])
+    # Second time it should not generate anything
+    self.assertNotContained('generating system library', self.do([PYTHON, EMBUILDER, 'build', 'libemmalloc']))
+    # Unless --force is specified
+    self.assertContained('generating system library', self.do([PYTHON, EMBUILDER, 'build', 'libemmalloc', '--force']))
+
   def test_embuilder_wasm_backend(self):
     if not Settings.WASM_BACKEND:
       self.skipTest('wasm backend only')
     restore_and_set_up()
     root_cache = os.path.expanduser('~/.emscripten_cache')
-    # the --lto flag makes us build wasm_bc
+    # the --lto flag makes us build wasm-bc
     self.do([PYTHON, EMCC, '--clear-cache'])
-    run_process([PYTHON, EMBUILDER, 'build', 'emmalloc'])
-    self.assertExists(os.path.join(root_cache, 'wasm_o'))
+    run_process([PYTHON, EMBUILDER, 'build', 'libemmalloc'])
+    self.assertExists(os.path.join(root_cache, 'wasm-obj'))
     self.do([PYTHON, EMCC, '--clear-cache'])
-    run_process([PYTHON, EMBUILDER, 'build', 'emmalloc', '--lto'])
-    self.assertExists(os.path.join(root_cache, 'wasm_bc'))
+    run_process([PYTHON, EMBUILDER, 'build', 'libemmalloc', '--lto'])
+    self.assertExists(os.path.join(root_cache, 'wasm-bc'))
