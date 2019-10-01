@@ -294,6 +294,9 @@ class Library(object):
     """
     return True
 
+  def erase(self):
+    shared.Cache.erase_file(self.get_filename())
+
   def get_path(self):
     """
     Gets the cached path of this library.
@@ -332,7 +335,7 @@ class Library(object):
     cflags = self.get_cflags()
     for src in self.get_files():
       o = self.in_temp(os.path.basename(src) + '.o')
-      commands.append([shared.PYTHON, self.emcc, src, '-o', o] + cflags)
+      commands.append([shared.PYTHON, self.emcc, '-c', src, '-o', o] + cflags)
       objects.append(o)
     run_commands(commands)
     return objects
@@ -540,6 +543,11 @@ class MuslInternalLibrary(Library):
     ['system', 'lib', 'libc', 'musl', 'arch', 'js'],
   ]
 
+  cflags = [
+    '-D_XOPEN_SOURCE=700',
+    '-Wno-unused-result',  # system call results are often ignored in musl, and in wasi that warns
+  ]
+
 
 class AsanInstrumentedLibrary(Library):
   def __init__(self, **kwargs):
@@ -586,11 +594,23 @@ class NoBCLibrary(Library):
 
 class libcompiler_rt(Library):
   name = 'libcompiler_rt'
-  depends = ['libc']
 
-  cflags = ['-O2']
+  cflags = ['-O2', '-fno-builtin']
   src_dir = ['system', 'lib', 'compiler-rt', 'lib', 'builtins']
   src_files = ['divdc3.c', 'divsc3.c', 'muldc3.c', 'mulsc3.c']
+  if shared.Settings.WASM_BACKEND:
+    src_files += ['addtf3.c', 'ashlti3.c', 'ashrti3.c', 'atomic.c', 'comparetf2.c', 'clzti2.c',
+                  'divtf3.c', 'divti3.c', 'udivmodti4.c',
+                  'extenddftf2.c', 'extendsftf2.c',
+                  'fixdfti.c', 'fixsfti.c', 'fixtfdi.c', 'fixtfsi.c', 'fixtfti.c',
+                  'fixunsdfti.c', 'fixunssfti.c', 'fixunstfdi.c', 'fixunstfsi.c', 'fixunstfti.c',
+                  'floatditf.c', 'floatsitf.c', 'floattidf.c', 'floattisf.c', 'floattitf.c',
+                  'floatunditf.c', 'floatunsitf.c', 'floatuntidf.c', 'floatuntisf.c', 'lshrti3.c',
+                  'modti3.c', 'multc3.c', 'multf3.c', 'multi3.c', 'subtf3.c', 'udivti3.c', 'umodti3.c', 'ashrdi3.c',
+                  'ashldi3.c', 'fixdfdi.c', 'floatdidf.c', 'lshrdi3.c', 'moddi3.c',
+                  'trunctfdf2.c', 'trunctfsf2.c', 'umoddi3.c', 'fixunsdfdi.c', 'muldi3.c',
+                  'divdi3.c', 'divmoddi4.c', 'udivdi3.c', 'udivmoddi4.c']
+    src_files.append(shared.path_from_root('system', 'lib', 'compiler-rt', 'extras.c'))
 
 
 class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
@@ -683,6 +703,19 @@ class libc(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
           if not cancel:
             libc_files.append(os.path.join(musl_srcdir, dirpath, f))
 
+    if shared.Settings.WASM_BACKEND:
+      # See libc_extras below
+      libc_files.append(shared.path_from_root('system', 'lib', 'libc', 'extras.c'))
+      # Include all the getenv stuff with the wasm backend. With fastcomp we
+      # still use JS because libc is a .bc file and we don't want to have a
+      # global constructor there for __environ, which would mean it is always
+      # included.
+      libc_files += files_in_path(
+          path_components=['system', 'lib', 'libc', 'musl', 'src', 'env'],
+          filenames=['__environ.c', 'getenv.c', 'putenv.c', 'setenv.c', 'unsetenv.c'])
+
+    libc_files.append(shared.path_from_root('system', 'lib', 'libc', 'wasi-helpers.c'))
+
     return libc_files
 
   def get_depends(self):
@@ -708,12 +741,20 @@ class libc_wasm(MuslInternalLibrary):
 
 
 class libc_extras(MuslInternalLibrary):
+  """This library is separate from libc itself for fastcomp only so that the
+  constructor it contains can be DCE'd.  With the wasm backend libc it is a .a
+  file so object file granularity applies.
+  """
+
   name = 'libc-extras'
   src_dir = ['system', 'lib', 'libc']
   src_files = ['extras.c']
 
+  def can_build(self):
+    return not shared.Settings.WASM_BACKEND
 
-class libcxxabi(CXXLibrary, MTLibrary):
+
+class libcxxabi(CXXLibrary, NoExceptLibrary, MTLibrary):
   name = 'libc++abi'
   depends = ['libc']
   cflags = ['-std=c++11', '-Oz', '-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS']
@@ -723,24 +764,32 @@ class libcxxabi(CXXLibrary, MTLibrary):
     cflags.append('-DNDEBUG')
     if not self.is_mt:
       cflags.append('-D_LIBCXXABI_HAS_NO_THREADS')
+    if self.is_noexcept:
+      cflags.append('-D_LIBCXXABI_NO_EXCEPTIONS')
     return cflags
 
-  src_dir = ['system', 'lib', 'libcxxabi', 'src']
-  src_files = [
-    'abort_message.cpp',
-    'cxa_aux_runtime.cpp',
-    'cxa_default_handlers.cpp',
-    'cxa_demangle.cpp',
-    'cxa_exception_storage.cpp',
-    'cxa_guard.cpp',
-    'cxa_handlers.cpp',
-    'fallback_malloc.cpp',
-    'stdlib_new_delete.cpp',
-    'stdlib_exception.cpp',
-    'stdlib_stdexcept.cpp',
-    'stdlib_typeinfo.cpp',
-    'private_typeinfo.cpp'
-  ]
+  def get_files(self):
+    filenames = [
+      'abort_message.cpp',
+      'cxa_aux_runtime.cpp',
+      'cxa_default_handlers.cpp',
+      'cxa_demangle.cpp',
+      'cxa_exception_storage.cpp',
+      'cxa_guard.cpp',
+      'cxa_handlers.cpp',
+      'cxa_virtual.cpp',
+      'fallback_malloc.cpp',
+      'stdlib_new_delete.cpp',
+      'stdlib_exception.cpp',
+      'stdlib_stdexcept.cpp',
+      'stdlib_typeinfo.cpp',
+      'private_typeinfo.cpp'
+    ]
+    if self.is_noexcept:
+      filenames += ['cxa_noexception.cpp']
+    return files_in_path(
+        path_components=['system', 'lib', 'libcxxabi', 'src'],
+        filenames=filenames)
 
 
 class libcxx(NoBCLibrary, CXXLibrary, NoExceptLibrary, MTLibrary):
@@ -977,6 +1026,11 @@ class libasmfs(CXXLibrary, MTLibrary):
   def get_files(self):
     return [shared.path_from_root('system', 'lib', 'fetch', 'asmfs.cpp')]
 
+  def can_build(self):
+    # ASMFS is looking for a maintainer
+    # https://github.com/emscripten-core/emscripten/issues/9534
+    return False
+
 
 class libhtml5(Library):
   name = 'libhtml5'
@@ -986,8 +1040,8 @@ class libhtml5(Library):
   src_glob = '*.c'
 
 
-class libpthreads(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
-  name = 'libpthreads'
+class libpthread(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
+  name = 'libpthread'
   depends = ['libc']
   cflags = ['-O2']
 
@@ -1039,7 +1093,7 @@ class libpthreads(AsanInstrumentedLibrary, MuslInternalLibrary, MTLibrary):
       return [shared.path_from_root('system', 'lib', 'pthread', 'library_pthread_stub.c')]
 
   def get_base_name_prefix(self):
-    return 'libpthreads' if self.is_mt else 'libpthreads_stub'
+    return 'libpthread' if self.is_mt else 'libpthread_stub'
 
 
 class CompilerRTWasmLibrary(NoBCLibrary):
@@ -1048,26 +1102,6 @@ class CompilerRTWasmLibrary(NoBCLibrary):
 
   def can_build(self):
     return shared.Settings.WASM_BACKEND
-
-
-class libcompiler_rt_wasm(CompilerRTWasmLibrary):
-  name = 'libcompiler_rt_wasm'
-
-  src_dir = ['system', 'lib', 'compiler-rt', 'lib', 'builtins']
-  src_files = ['addtf3.c', 'ashlti3.c', 'ashrti3.c', 'atomic.c', 'comparetf2.c',
-               'divtf3.c', 'divti3.c', 'udivmodti4.c',
-               'extenddftf2.c', 'extendsftf2.c',
-               'fixdfti.c', 'fixsfti.c', 'fixtfdi.c', 'fixtfsi.c', 'fixtfti.c',
-               'fixunsdfti.c', 'fixunssfti.c', 'fixunstfdi.c', 'fixunstfsi.c', 'fixunstfti.c',
-               'floatditf.c', 'floatsitf.c', 'floattidf.c', 'floattisf.c',
-               'floatunditf.c', 'floatunsitf.c', 'floatuntidf.c', 'floatuntisf.c', 'lshrti3.c',
-               'modti3.c', 'multc3.c', 'multf3.c', 'multi3.c', 'subtf3.c', 'udivti3.c', 'umodti3.c', 'ashrdi3.c',
-               'ashldi3.c', 'fixdfdi.c', 'floatdidf.c', 'lshrdi3.c', 'moddi3.c',
-               'trunctfdf2.c', 'trunctfsf2.c', 'umoddi3.c', 'fixunsdfdi.c', 'muldi3.c',
-               'divdi3.c', 'divmoddi4.c', 'udivdi3.c', 'udivmoddi4.c']
-
-  def get_files(self):
-    return super(libcompiler_rt_wasm, self).get_files() + [shared.path_from_root('system', 'lib', 'compiler-rt', 'extras.c')]
 
 
 class libc_rt_wasm(AsanInstrumentedLibrary, CompilerRTWasmLibrary, MuslInternalLibrary):
@@ -1138,6 +1172,34 @@ class libasan_rt_wasm(SanitizerLibrary):
   depends = ['liblsan_common_rt_wasm', 'libubsan_rt_wasm']
 
   src_dir = ['system', 'lib', 'compiler-rt', 'lib', 'asan']
+
+
+# This library is used when STANDALONE_WASM is set. In that mode, we don't
+# want to depend on JS, and so this library contains implementations of
+# things that we'd normally do in JS. That includes some general things
+# as well as some additional musl components (that normally we reimplement
+# in JS as it's more efficient that way).
+class libstandalonewasm(MuslInternalLibrary):
+  name = 'libstandalonewasm'
+
+  cflags = ['-Os']
+  src_dir = ['system', 'lib']
+
+  def get_files(self):
+    base_files = files_in_path(
+        path_components=['system', 'lib'],
+        filenames=['standalone_wasm.c'])
+    musl_files = files_in_path(
+        path_components=['system', 'lib', 'libc', 'musl', 'src', 'time'],
+        filenames=['strftime.c',
+                   '__month_to_secs.c',
+                   '__tm_to_secs.c',
+                   '__tz.c',
+                   '__year_to_secs.c'])
+    return base_files + musl_files
+
+  def can_build(self):
+    return shared.Settings.WASM_BACKEND
 
 
 # If main() is not in EXPORTED_FUNCTIONS, it may be dce'd out. This can be
@@ -1218,7 +1280,7 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
       for dep in value:
         shared.Settings.EXPORTED_FUNCTIONS.append(mangle_c_symbol_name(dep))
 
-  always_include.add('libpthreads')
+  always_include.add('libpthread')
   if shared.Settings.MALLOC != 'none':
     always_include.add('libmalloc')
   if shared.Settings.WASM_BACKEND:
@@ -1300,7 +1362,6 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
     add_library(lib)
 
   if shared.Settings.WASM_BACKEND:
-    add_library(system_libs_map['libcompiler_rt_wasm'])
     add_library(system_libs_map['libc_rt_wasm'])
 
   if shared.Settings.UBSAN_RUNTIME == 1:
@@ -1315,6 +1376,9 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
   if shared.Settings.USE_ASAN:
     force_include.add('libasan_rt_wasm')
     add_library(system_libs_map['libasan_rt_wasm'])
+
+  if shared.Settings.STANDALONE_WASM:
+    add_library(system_libs_map['libstandalonewasm'])
 
   libs_to_link.sort(key=lambda x: x[0].endswith('.a')) # make sure to put .a files at the end.
 
